@@ -1,0 +1,2 @@
+// Windows 资源: exe 文件图标 (由 tools/make_icon.cpp 生成 my_com.ico, 7 尺寸)
+IDI_ICON1 ICON DISCARDABLE "my_com.ico"

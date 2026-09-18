@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "note": "Finca 主控调试指令表（源自 APP/Application/debug.c）。帧格式：@Rxx:y / @Cxx:y 定长 6 字节；@Wxx:<值>. 值域固定 5 字节且必须含 '.'（4 位数字 + '.'），带参指令用 %1 占位替换为 4 位数字。",
+  "groups": [
+    {
+      "group": "基础回显",
+      "commands": [
+        { "name": "通道回显 R", "send": "@R01:0", "desc": "打印连接位 0/1（debug R ok,0/1）" },
+        { "name": "通道回显 C", "send": "@C01:0", "desc": "打印连接位 0/1（debug C ok,0/1）" },
+        { "name": "回显 W", "send": "@W00:0000.", "desc": "通道自检（debug W ok,<值>）" }
+      ]
+    },
+    {
+      "group": "状态查询",
+      "commands": [
+        { "name": "工作状态", "send": "@R06:0", "desc": "负载位图/两锅炉水位标志/流量计数/压力(0.01bar)" },
+        { "name": "工作时间", "send": "@R15:0", "desc": "工作位图/萃取蒸汽设定与超时/清洗时间" },
+        { "name": "报警位图", "send": "@R30:0", "desc": "E1/E2/E3 报警位图（十六进制）" },
+        { "name": "版本信息", "send": "@R20:0", "desc": "项目名/版本/UID/序列号/标定参数（升级成功判据）" },
+        { "name": "屏幕版本", "send": "@R21:0", "desc": "lcd version: ..." },
+        { "name": "输入电平", "send": "@R03:0", "desc": "PE15萃取开关/PE6蒸汽开关/PE4水箱在位/PE5缺水" }
+      ]
+    },
+    {
+      "group": "传感器",
+      "commands": [
+        { "name": "计量芯片", "send": "@R02:0", "desc": "电压/电流/功率/频率" },
+        { "name": "萃取锅炉水位", "send": "@R04:0", "desc": "探针电平/计数/判定标志" },
+        { "name": "蒸汽锅炉水位", "send": "@R05:0", "desc": "探针电平/计数/判定标志" },
+        { "name": "磨豆秤", "send": "@R09:0", "desc": "adc/滤波值/标定系数" },
+        { "name": "萃取秤", "send": "@R10:0", "desc": "adc/滤波值/标定系数" },
+        { "name": "ADC原始值", "send": "@R12:0", "desc": "3路NTC/压力/芯片温度/基准电压" },
+        { "name": "温度", "send": "@R13:0", "desc": "3路NTC/主板/驱动板(0.1℃)" }
+      ]
+    },
+    {
+      "group": "调试控制",
+      "commands": [
+        { "name": "调试标志", "send": "@W01:0001.", "desc": "设置 debug_flag_w = 1（改 0 用自定义发送）" },
+        { "name": "调试加热", "send": "@W02:0001.", "desc": "设置 debug_heat = 1（改 0 用自定义发送）" },
+        { "name": "PD8开关", "send": "@W03:0001.", "desc": "GPIOD PIN8 置位（复位用自定义发送 @W03:0000.）" },
+        { "name": "进入休眠", "send": "@W04:0001.", "desc": "非 0 创建 sleep 任务" },
+        { "name": "设定压力", "send": "@W05:%1.", "hasParam": true, "paramDefault": "0900", "paramHint": "萃取压力(0.01bar)，如0900=9.00bar，4位数字", "desc": "设定萃取压力（0.01bar）" }
+      ]
+    },
+    {
+      "group": "校准",
+      "commands": [
+        { "name": "标定电压", "send": "@W21:%1.", "hasParam": true, "paramDefault": "0230", "paramHint": "电压(0.1V)，如0230=23.0V，4位数字", "desc": "app_param_set(1, 电压)" },
+        { "name": "萃取秤标定", "send": "@W22:%1.", "hasParam": true, "paramDefault": "1000", "paramHint": "标定值，4位数字", "desc": "app_param_set(2, 萃取称系数)" },
+        { "name": "磨豆秤标定", "send": "@W23:%1.", "hasParam": true, "paramDefault": "1000", "paramHint": "标定值，4位数字", "desc": "app_param_set(3, 研磨称系数)" }
+      ]
+    },
+    {
+      "group": "特殊模式",
+      "commands": [
+        { "name": "模块测试", "send": "@W20:0000.", "desc": "进入模块控制（task_create modular_test）" },
+        { "name": "老化模式", "send": "@W90:0000.", "desc": "创建控制盒任务（box）" },
+        { "name": "触发OTA", "send": "@W12:0000.", "desc": "触发固件升级（值域必须含 '.'，05c D13/A8）" }
+      ]
+    }
+  ]
+}

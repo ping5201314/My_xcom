@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>UpgradePage</class>
+ <widget class="QWidget" name="UpgradePage">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>700</width>
+    <height>620</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>固件升级</string>
+  </property>
+  <layout class="QVBoxLayout" name="rootLayout">
+   <item>
+    <widget class="QGroupBox" name="fileBox">
+     <property name="title">
+      <string>固件文件（.bin，≤120K）</string>
+     </property>
+     <layout class="QVBoxLayout" name="fileLay">
+      <item>
+       <layout class="QHBoxLayout" name="fileRow">
+        <item>
+         <widget class="QLineEdit" name="m_fileEdit">
+          <property name="readOnly">
+           <bool>true</bool>
+          </property>
+          <property name="placeholderText">
+           <string>请选择固件 .bin 文件</string>
+          </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QPushButton" name="m_browseBtn">
+          <property name="text">
+           <string>浏览…</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QLabel" name="m_fileInfo">
+        <property name="textFormat">
+         <enum>Qt::TextFormat::RichText</enum>
+        </property>
+        <property name="wordWrap">
+         <bool>true</bool>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="btnRow">
+     <item>
+      <widget class="QPushButton" name="m_startBtn">
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>32</height>
+        </size>
+       </property>
+       <property name="text">
+        <string>开始升级</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="m_cancelBtn">
+       <property name="enabled">
+        <bool>false</bool>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>32</height>
+        </size>
+       </property>
+       <property name="text">
+        <string>取消</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <layout class="QHBoxLayout" name="progRow">
+     <item>
+      <widget class="QProgressBar" name="m_progress">
+       <property name="minimum">
+        <number>0</number>
+       </property>
+       <property name="maximum">
+        <number>0</number>
+       </property>
+       <property name="value">
+        <number>0</number>
+       </property>
+       <property name="textVisible">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="m_phaseLabel">
+       <property name="text">
+        <string>待命</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item>
+    <widget class="QLabel" name="m_banner">
+     <property name="visible">
+      <bool>false</bool>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="logBox">
+     <property name="title">
+      <string>过程日志</string>
+     </property>
+     <layout class="QVBoxLayout" name="logLay">
+      <item>
+       <layout class="QHBoxLayout" name="logBtnRow">
+        <item>
+         <spacer name="logSpacer">
+          <property name="orientation">
+           <enum>Qt::Orientation::Horizontal</enum>
+          </property>
+          <property name="sizeHint" stdset="0">
+           <size>
+            <width>40</width>
+            <height>20</height>
+           </size>
+          </property>
+         </spacer>
+        </item>
+        <item>
+         <widget class="QPushButton" name="m_saveLogBtn">
+          <property name="text">
+           <string>保存日志</string>
+          </property>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QPlainTextEdit" name="m_logView">
+        <property name="font">
+         <font>
+          <family>Consolas</family>
+         </font>
+        </property>
+        <property name="readOnly">
+         <bool>true</bool>
+        </property>
+        <property name="maximumBlockCount">
+         <number>5000</number>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="note">
+     <property name="styleSheet">
+      <string notr="true">color:#7f8c8d;</string>
+     </property>
+     <property name="text">
+      <string>说明：1) 升级期间串口将自动切换为 115200 8N1 无流控，结束后恢复原配置；2) 升级期间不要插拔 USB 线，不要在其它页签发送任何指令；3) 取消或失败后需等待 4 秒冷却才能再次开始；若设备进入无响应状态（同轮二次 @W12 可能卡死设备，05c §5 风险3），请断电重启设备。</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

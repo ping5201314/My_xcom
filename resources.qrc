@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/">
+        <file alias="icons/my_com.png">resources/my_com.png</file>
+    </qresource>
+</RCC>
