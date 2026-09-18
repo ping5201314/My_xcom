@@ -1,6 +1,8 @@
 #include "debugcmd/debugcommand.h"
 
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -38,6 +40,11 @@ bool DebugCommandModel::load(const QString& jsonPath)
 
 bool DebugCommandModel::save(const QString& jsonPath) const
 {
+    // 目标目录可能不存在（如 %APPDATA%/MyTeam/my_com 首次使用时还没创建过，
+    // 直接写文件会报"无法写入"——用户真机反馈过），先建目录再写
+    const QString dir = QFileInfo(jsonPath).absolutePath();
+    if (!dir.isEmpty() && !QDir().mkpath(dir))
+        return false;
     // 按当前分组结构重建 JSON（pretty 缩进，保留手工编辑可读性），原子写盘
     QJsonArray groups;
     for (const Group& g : m_groups) {

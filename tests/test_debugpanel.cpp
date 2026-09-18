@@ -182,47 +182,34 @@ static void testParamValidationAndSubstitution()
     CHECK(p.m_paramEdit->isVisible(), "带参指令选中显示参数框");
     CHECK(p.m_paramEdit->text() == QStringLiteral("0900"), "带参指令默认参数 0900 填充");
 
-    // 恰好 4 位数字：通过并替换 %1
+    // 参数原样替换 %1（用户要求：取消"恰好 4 位数字"限制，通用串口助手
+    // 不绑定特定协议参数约定）
     p.m_paramEdit->setText(QStringLiteral("0900"));
     CHECK(p.currentFrameText() == QStringLiteral("@W05:0900."),
-          "%1 替换：4 位数字 → @W05:0900.");
-    p.m_paramEdit->setText(QStringLiteral("0000"));
-    CHECK(p.currentFrameText() == QStringLiteral("@W05:0000."),
-          "%1 替换边界：0000 通过 → @W05:0000.");
-
-    // 非法输入拒绝（返回空帧）
+          "%1 替换：0900 → @W05:0900.");
     p.m_paramEdit->setText(QStringLiteral("123"));
-    CHECK(p.currentFrameText().isEmpty(), "3 位数字拒绝");
-    // 5 位数字：UI 层 maxLength=4 在入口截断（setText 亦被截断为 4 位）。
-    // 先放开截断直测校验层 ^\d{4}$ 的 5 位拒绝，再恢复并验证截断行为本身。
-    p.m_paramEdit->setMaxLength(10);
+    CHECK(p.currentFrameText() == QStringLiteral("@W05:123."),
+          "任意位数参数接受（3 位）");
     p.m_paramEdit->setText(QStringLiteral("12345"));
-    CHECK(p.currentFrameText().isEmpty(), "5 位数字拒绝（校验层，放开 maxLength 直测）");
-    p.m_paramEdit->setMaxLength(4);
-    p.m_paramEdit->setText(QStringLiteral("12345"));
-    CHECK(p.m_paramEdit->text() == QStringLiteral("1234"),
-          "UI 层 maxLength=4 入口截断（5 位输入只能到达 4 位）");
+    CHECK(p.currentFrameText() == QStringLiteral("@W05:12345."),
+          "任意位数参数接受（5 位，不再入口截断）");
     p.m_paramEdit->setText(QStringLiteral("12a4"));
-    CHECK(p.currentFrameText().isEmpty(), "非数字拒绝");
+    CHECK(p.currentFrameText() == QStringLiteral("@W05:12a4."),
+          "非纯数字参数接受");
     p.m_paramEdit->setText(QStringLiteral("+123"));
-    CHECK(p.currentFrameText().isEmpty(), "带符号拒绝");
-    p.m_paramEdit->setText(QStringLiteral(""));
-    CHECK(p.currentFrameText().isEmpty(), "空参数拒绝");
-    CHECK(p.m_logView->toPlainText().contains(QStringLiteral("必须恰好 4 位数字")),
-          "非法参数有明确日志提示（W 值域固定 5 字节且必须含 '.'）");
+    CHECK(p.currentFrameText() == QStringLiteral("@W05:+123."),
+          "带符号参数接受");
+    p.m_paramEdit->setText(QStringLiteral("hello"));
+    CHECK(p.currentFrameText() == QStringLiteral("@W05:hello."),
+          "任意文本参数接受");
 
-    // 模板缺 %1：拒绝并提示。
-    // 注：业务日志文案为 "指令模板缺少 %1 占位符，无法注入参数：%1"，QString::arg(frame)
-    // 会把文案里的字面 %1 一并替换成帧文本（文案瑕疵，已在测试报告登记），
-    // 因此断言“缺少/占位符”关键词而非完整文案。
+    // 模板缺 %1：参数无位置可注入，原样发送模板本身（不再拒绝）
     auto* item2 = g->child(1);
     p.m_tree->setCurrentItem(item2);
     CHECK(p.m_paramEdit->isVisible(), "带参声明但缺 %1 的指令仍显示参数框");
     p.m_paramEdit->setText(QStringLiteral("1234"));
-    CHECK(p.currentFrameText().isEmpty(), "模板缺 %1 拒绝发送");
-    const QString logNow = p.m_logView->toPlainText();
-    CHECK(logNow.contains(QStringLiteral("缺少")) && logNow.contains(QStringLiteral("占位符")),
-          "模板缺 %1 有日志提示（文案中字面 %1 被 arg 替换，已登记）");
+    CHECK(p.currentFrameText() == item2->data(0, Qt::UserRole).value<DebugCommand>().send,
+          "模板缺 %1 原样发送（不再拒绝）");
 
     // 无参指令：参数区隐藏，帧文本即 send 原文
     auto* itemR = [&]() -> QTreeWidgetItem* {

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Finca 主控调试指令表（源自 APP/Application/debug.c）。帧格式：@Rxx:y / @Cxx:y 定长 6 字节；@Wxx:<值>. 值域固定 5 字节且必须含 '.'（4 位数字 + '.'），带参指令用 %1 占位替换为 4 位数字。",
+  "note": "调试指令表（JSON 配置，可在程序内「编辑指令」增改；带参指令用 %1 占位，参数值任意）。",,
   "groups": [
     {
       "group": "基础回显",
@@ -40,15 +40,15 @@
         { "name": "调试加热", "send": "@W02:0001.", "desc": "设置 debug_heat = 1（改 0 用自定义发送）" },
         { "name": "PD8开关", "send": "@W03:0001.", "desc": "GPIOD PIN8 置位（复位用自定义发送 @W03:0000.）" },
         { "name": "进入休眠", "send": "@W04:0001.", "desc": "非 0 创建 sleep 任务" },
-        { "name": "设定压力", "send": "@W05:%1.", "hasParam": true, "paramDefault": "0900", "paramHint": "萃取压力(0.01bar)，如0900=9.00bar，4位数字", "desc": "设定萃取压力（0.01bar）" }
+        { "name": "设定压力", "send": "@W05:%1.", "hasParam": true, "paramDefault": "0900", "paramHint": "萃取压力(0.01bar)，如0900=9.00bar", "desc": "设定萃取压力（0.01bar）" }
       ]
     },
     {
       "group": "校准",
       "commands": [
-        { "name": "标定电压", "send": "@W21:%1.", "hasParam": true, "paramDefault": "0230", "paramHint": "电压(0.1V)，如0230=23.0V，4位数字", "desc": "app_param_set(1, 电压)" },
-        { "name": "萃取秤标定", "send": "@W22:%1.", "hasParam": true, "paramDefault": "1000", "paramHint": "标定值，4位数字", "desc": "app_param_set(2, 萃取称系数)" },
-        { "name": "磨豆秤标定", "send": "@W23:%1.", "hasParam": true, "paramDefault": "1000", "paramHint": "标定值，4位数字", "desc": "app_param_set(3, 研磨称系数)" }
+        { "name": "标定电压", "send": "@W21:%1.", "hasParam": true, "paramDefault": "0230", "paramHint": "电压(0.1V)，如0230=23.0V", "desc": "app_param_set(1, 电压)" },
+        { "name": "萃取秤标定", "send": "@W22:%1.", "hasParam": true, "paramDefault": "1000", "paramHint": "标定值", "desc": "app_param_set(2, 萃取称系数)" },
+        { "name": "磨豆秤标定", "send": "@W23:%1.", "hasParam": true, "paramDefault": "1000", "paramHint": "标定值", "desc": "app_param_set(3, 研磨称系数)" }
       ]
     },
     {

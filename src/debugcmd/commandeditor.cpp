@@ -10,7 +10,6 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QRegularExpression>
 #include <QTableWidget>
 #include <QVBoxLayout>
 
@@ -36,8 +35,8 @@ CommandEditorDialog::CommandEditorDialog(const QString& loadPath, const QString&
 
     auto* root = new QVBoxLayout(this);
     root->addWidget(new QLabel(
-        QStringLiteral("分组与指令可自由增改；带参数指令的 send 用 %1 占位（如 @W21:%1.），"
-                       "默认参数必须是 4 位数字（W 值域固定 5 字节且必须含 '.'）。"),
+        QStringLiteral("分组与指令可自由增改；带参数指令的 send 用 %1 占位（如 @W21:%1.）。"
+                       "参数不做位数/格式限制（通用串口助手，不绑定特定协议）。"),
         this));
 
     m_table = new QTableWidget(this);
@@ -149,7 +148,6 @@ void CommandEditorDialog::onRemoveSelected()
 bool CommandEditorDialog::collectAndValidate(QString* err)
 {
     QVector<DebugCommandModel::Entry> es;
-    static const QRegularExpression digits4(QStringLiteral("^\\d{4}$"));
     for (int r = 0; r < m_table->rowCount(); ++r) {
         const auto text = [this, r](int col) {
             const QTableWidgetItem* it = m_table->item(r, col);
@@ -163,14 +161,10 @@ bool CommandEditorDialog::collectAndValidate(QString* err)
         e.cmd.hasParam = combo && combo->currentIndex() == 1;
         e.cmd.paramDefault = text(ColDefault);
         e.cmd.paramHint = text(ColHint);
+        // 只保留基础完整性校验（空字段会存出损坏的 JSON）；参数格式不做限制
+        //（用户要求：通用串口助手，不绑定特定协议的参数约定）
         if (e.group.isEmpty() || e.cmd.name.isEmpty() || e.cmd.send.isEmpty()) {
             *err = QStringLiteral("第 %1 行：分组/名称/发送内容不能为空").arg(r + 1);
-            return false;
-        }
-        if (e.cmd.hasParam && !digits4.match(e.cmd.paramDefault).hasMatch()) {
-            *err = QStringLiteral("第 %1 行「%2」：带参数指令的默认参数必须恰好 4 位数字")
-                       .arg(r + 1)
-                       .arg(e.cmd.name);
             return false;
         }
         es.append(e);

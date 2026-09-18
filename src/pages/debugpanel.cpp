@@ -88,8 +88,7 @@ void DebugPanel::buildUi()
     m_paramLabel->hide();
     m_paramEdit = new QLineEdit(this);
     m_paramEdit->hide();
-    m_paramEdit->setMaxLength(4);
-    m_paramEdit->setPlaceholderText(QStringLiteral("4 位数字"));
+    m_paramEdit->setPlaceholderText(QStringLiteral("参数值"));
     m_sendBtn = new QPushButton(QStringLiteral("发送选中指令"), this);
     connect(m_sendBtn, &QPushButton::clicked, this, &DebugPanel::onSendCurrent);
     paramRow->addWidget(m_paramLabel);
@@ -120,15 +119,11 @@ void DebugPanel::buildUi()
 
 void DebugPanel::loadCommands()
 {
-    // 用户编辑过的指令表优先（%APPDATA%/MyTeam/my_com/debug_commands.json，编辑
-    // 对话框的保存目标），其次才是 exe 旁随程序分发的默认表（构建时复制）。
-    // 这样重编译/换 exe 位置都不丢编辑结果（用户反馈：下次打开要和之前编辑的一样）。
-    const QString exePath = QDir(QCoreApplication::applicationDirPath())
-                                .filePath(QStringLiteral("debug_commands.json"));
-    const QString userPath =
-        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
-        + QStringLiteral("/debug_commands.json");
-    m_commandPath = QFile::exists(userPath) ? userPath : exePath;
+    // 指令表位置（用户反馈：数据要跟着工程走，不放到 %APPDATA%）：
+    // exe 旁的 debug_commands.json（构建时从 commands/ 复制过来）。
+    // 编辑保存也是同一个文件——改完想进源码就把它复制回 commands/ 提交。
+    m_commandPath = QDir(QCoreApplication::applicationDirPath())
+                        .filePath(QStringLiteral("debug_commands.json"));
 
     DebugCommandModel model;
     if (model.load(m_commandPath) && !model.groups().isEmpty()) {
@@ -151,11 +146,9 @@ void DebugPanel::loadCommands()
 
 void DebugPanel::onEditCommands()
 {
-    // 保存目标固定为用户目录：编辑结果跨构建、跨目录持久（用户反馈）
-    const QString userPath =
-        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
-        + QStringLiteral("/debug_commands.json");
-    CommandEditorDialog dlg(m_commandPath, userPath, this);
+    // 保存到与加载相同的位置（exe 旁，即工程路径）——用户反馈：数据跟着工程走，
+    // 不放 %APPDATA%；想进源码就把改好的文件复制回 commands/debug_commands.json
+    CommandEditorDialog dlg(m_commandPath, m_commandPath, this);
     if (dlg.exec() == QDialog::Accepted) {
         m_tree->clear();
         loadCommands(); // 重新加载并重建指令树
@@ -172,7 +165,7 @@ void DebugPanel::addGroup(const QString& group, const QVector<DebugCommand>& cmd
         item->setData(0, Qt::UserRole, QVariant::fromValue(c));
         if (c.hasParam)
             item->setToolTip(0, QStringLiteral("%1\n参数：%2")
-                                    .arg(c.send, c.paramHint.isEmpty() ? QStringLiteral("4 位数字")
+                                    .arg(c.send, c.paramHint.isEmpty() ? QStringLiteral("参数值")
                                                                        : c.paramHint));
         else
             item->setToolTip(0, c.send);
@@ -249,24 +242,12 @@ QString DebugPanel::currentFrameText()
         }
         return frame;
     }
-    // W 指令值域固定 5 字节且必须含 '.'（05c D13）：4 位数字 + '.'，UI 只填数字部分
+    // 参数不做位数/格式限制（用户要求）：本工具是通用串口助手，不绑定 Finca 的
+    // 5 字节值域约定。参数原样替换 %1；模板没有 %1 就原样发送
     const QString param = m_paramEdit->text();
-    static const QRegularExpression re(QStringLiteral("^\\d{4}$"));
-    if (!re.match(param).hasMatch()) {
-        appendLog(QStringLiteral("参数“%1”非法：必须恰好 4 位数字（W 值域固定 5 字节且必须含 '.'）")
-                      .arg(param),
-                  QColor(QStringLiteral("#C0392B")));
-        return QString();
-    }
     QString frame = cmd.send;
-    if (!frame.contains(QStringLiteral("%1"))) {
-        // 修复 SF-2：文案中的字面 %1 用 %%1 转义，避免被 .arg(frame) 一并替换，
-        // 显示成"缺少 @W22:0000. 占位符"这种自相矛盾的文字
-        appendLog(QStringLiteral("指令模板缺少 %%1 占位符，无法注入参数：%1").arg(frame),
-                  QColor(QStringLiteral("#C0392B")));
-        return QString();
-    }
-    frame.replace(QStringLiteral("%1"), param);
+    if (frame.contains(QStringLiteral("%1")))
+        frame.replace(QStringLiteral("%1"), param);
     return frame;
 }
 
