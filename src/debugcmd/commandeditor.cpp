@@ -180,6 +180,17 @@ bool CommandEditorDialog::doSave()
         QMessageBox::warning(this, QStringLiteral("无法保存"), err);
         return false;
     }
+    // 防呆（真机教训：用户误删全部行后关闭即保存，指令表被存成空表）：
+    // 空表保存前必须明确确认
+    if (m_model.entries().isEmpty()) {
+        const auto r = QMessageBox::question(
+            this, QStringLiteral("指令表为空"),
+            QStringLiteral("当前指令表没有任何指令，保存后调试面板将只剩内置最小集。\n"
+                           "确定要保存空表吗？"),
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (r != QMessageBox::Yes)
+            return false;
+    }
     if (!m_model.save(m_jsonPath)) {
         QMessageBox::warning(this, QStringLiteral("保存失败"),
                              QStringLiteral("无法写入：%1").arg(m_jsonPath));

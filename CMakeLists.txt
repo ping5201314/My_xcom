@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(my_com VERSION 0.1.0 LANGUAGES CXX)
+project(my_com VERSION 1.0.0.1 LANGUAGES CXX)
 
 # C++17：Qt6 最低要求 C++17，任务规格亦指定
 set(CMAKE_CXX_STANDARD 17)
@@ -47,6 +47,8 @@ qt_add_executable(my_com MANUAL_FINALIZATION
     src/debugcmd/debugcommand.cpp
     src/debugcmd/commandeditor.h
     src/debugcmd/commandeditor.cpp
+    src/cli/climode.h
+    src/cli/climode.cpp
     src/upgrade/upgradeengine.h
     src/upgrade/upgradeengine.cpp
 )
@@ -63,12 +65,14 @@ target_link_libraries(my_com PRIVATE
 )
 qt_finalize_executable(my_com)
 
-# 调试指令表：运行期由“调试指令”页加载，复制到可执行文件目录
+# 调试指令表：运行期由“调试指令”页加载。只在 exe 旁不存在时做一次“种子复制”
+# ——用户通过「编辑指令」保存的定制表不再被后续构建覆盖（真机教训）
 add_custom_command(TARGET my_com POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_CURRENT_SOURCE_DIR}/commands/debug_commands.json
-        $<TARGET_FILE_DIR:my_com>/debug_commands.json
-    COMMENT "Copying commands/debug_commands.json next to my_com.exe"
+    COMMAND ${CMAKE_COMMAND}
+        -Dsrc=${CMAKE_CURRENT_SOURCE_DIR}/commands/debug_commands.json
+        -Ddst=$<TARGET_FILE_DIR:my_com>/debug_commands.json
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/seed_command_table.cmake
+    COMMENT "Seeding debug_commands.json next to my_com.exe (only if missing)"
 )
 
 # ---- 单元测试：默认不构建（用户要求：日常开发 Qt Creator 里只看主程序）----

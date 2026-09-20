@@ -3,7 +3,9 @@
 // 否则 ini 会写到错误位置。
 #include <QApplication>
 #include <QIcon>
+#include "cli/climode.h"
 #include "mainwindow.h"
+#include "version.h"
 
 namespace {
 // 全局配色：与图标一致的深蓝主色 + 橙色点缀。控件动态属性选择器：
@@ -62,10 +64,15 @@ QProgressBar::chunk { background: #2C4C8C; border-radius: 4px; }
 
 int main(int argc, char* argv[])
 {
+    // 命令行模式（AI/脚本调试用）：my_com.exe cli send|listen|upgrade ...
+    // 无界面、纯文本输出到 stdout，供 Claude Code 等 AI 直接控制串口
+    if (argc > 1 && qstrcmp(argv[1], "cli") == 0)
+        return runCliMode(argc, argv);
+
     QApplication app(argc, argv);
     QApplication::setOrganizationName(QStringLiteral("MyTeam"));
     QApplication::setApplicationName(QStringLiteral("my_com"));
-    QApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+    QApplication::setApplicationVersion(QStringLiteral(MYCOM_VERSION_STR));
     app.setStyleSheet(QString::fromLatin1(kAppStyle));
     // 窗口/任务栏图标;exe 文件图标由 my_com.rc 提供
     app.setWindowIcon(QIcon(QStringLiteral(":/icons/my_com.png")));

@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "version.h"
 
 #include "config/appconfig.h"
 #include "pages/debugpanel.h"
@@ -18,7 +19,7 @@ MainWindow::MainWindow(QWidget* parent)
     , m_config(new AppConfig)
     , m_port(new SerialPort(this))
 {
-    setWindowTitle(QStringLiteral("my_com 串口助手"));
+    setWindowTitle(QStringLiteral("my_com 串口助手 ") + QStringLiteral(MYCOM_VERSION_STR));
 
     // 两个页签：串口助手（左栏含调试指令面板）/ 固件升级。
     // 调试指令不再单独开窗或侧栏：放进串口助手页左栏「发送设置」下方，与主界面一体

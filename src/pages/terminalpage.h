@@ -42,6 +42,11 @@ public:
     /// 主窗口用它设置拖动下限（用户要求：按接收区最小值定窗口最小值）
     int minimumNeededWidth() const;
 
+    /// 把本页的收发写进共享监视文件（%TEMP%/my_com_trace.log，追加）：
+    /// AI 能读到用户在 GUI 里的每一次发送与收到的数据（双向协作）
+    void writeTrace(const QString& line);
+
+
 public slots:
     /// 修复 C2：升级占用期间完全禁用终端页交互（端口配置行/开关串口/发送/循环发送等），
     /// 按钮显示"升级占用中"避免误导；正在运行的循环发送自动停止。
@@ -61,6 +66,8 @@ private slots:
     void onError(const QString& msg);
     void onSaveLog();
     void onViewModeChanged(int idx);
+    void onWatchToggle(bool on); // 监视 AI 会话：读共享跟踪文件，不占串口
+    void onWatchTick();          // 500ms 轮询跟踪文件增量并上屏
 
 private:
     void buildUi();
@@ -102,6 +109,13 @@ private:
     QCheckBox* m_tsCheck;
     QCheckBox* m_scrollCheck;
     QCheckBox* m_pauseCheck;
+    QCheckBox* m_watchCheck;  // 监视 AI 会话（读 %TEMP%/my_com_trace.log，不占串口）
+    QTimer* m_watchTimer = nullptr; // 监视轮询定时器
+    qint64 m_watchPos = 0;    // 跟踪文件已读位置
+    QTimer* m_relayTimer = nullptr; // AI 中转轮询：读 %TEMP%/my_com_ai_tx.txt 并代发
+    void onRelayTick();       // 中转请求消费（AI 的指令经本 GUI 的串口发出）
+    QString m_traceRxBuf;     // GUI-RX 共享记录的行聚合缓冲（完整行才写文件）
+    bool m_watchInText = false; // 监视解析状态：正在 RX文本 内容块内（跨 tick 保持）
     QPushButton* m_clearRxBtn;
     QPushButton* m_saveBtn;
 

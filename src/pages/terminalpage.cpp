@@ -6,6 +6,8 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
 #include <QEvent>
 #include <QFileDialog>
 #include <QFontDatabase>
@@ -219,6 +221,17 @@ void TerminalPage::buildUi()
     m_scrollCheck = new QCheckBox(QStringLiteral("自动滚动"), rxBox);
     m_pauseCheck = new QCheckBox(QStringLiteral("暂停显示"), rxBox);
     m_pauseCheck->setToolTip(QStringLiteral("暂停时数据仍接收并计数，恢复后一次性补显"));
+    m_watchCheck = new QCheckBox(QStringLiteral("监视AI会话"), rxBox);
+    m_watchCheck->setToolTip(
+        QStringLiteral("AI 通过命令行控制串口时，这里实时显示它的收发（不占用串口）"));
+    connect(m_watchCheck, &QCheckBox::toggled, this, &TerminalPage::onWatchToggle);
+    m_watchTimer = new QTimer(this);
+    m_watchTimer->setInterval(500);
+    connect(m_watchTimer, &QTimer::timeout, this, &TerminalPage::onWatchTick);
+    // AI 中转轮询：串口打开期间一直跑，消费 AI 的转发请求（COM 口独占下的协同调试）
+    m_relayTimer = new QTimer(this);
+    m_relayTimer->setInterval(500);
+    connect(m_relayTimer, &QTimer::timeout, this, &TerminalPage::onRelayTick);
     m_clearRxBtn = new QPushButton(QStringLiteral("清空"), rxBox);
     // 用户反馈：保存日志功能要保留——按钮文字保持「保存日志」明确可见
     m_saveBtn = new QPushButton(QStringLiteral("保存日志"), rxBox);
@@ -229,6 +242,7 @@ void TerminalPage::buildUi()
     rxTool->addWidget(m_tsCheck);
     rxTool->addWidget(m_scrollCheck);
     rxTool->addWidget(m_pauseCheck);
+    rxTool->addWidget(m_watchCheck);
     rxTool->addWidget(m_clearRxBtn);
     rxTool->addWidget(m_saveBtn);
     rxTool->addStretch(1);
@@ -393,6 +407,132 @@ int TerminalPage::minimumNeededWidth() const
     return m_splitter ? m_splitter->minimumSizeHint().width() : 1150;
 }
 
+void TerminalPage::writeTrace(const QString& line)
+{
+    // 共享监视文件（与 CLI 同一路径）：用户 GUI 的收发也记录进去，
+    // AI 读这个文件就能知道人在界面上发了什么、设备回了什么
+    const QString path = QDir::tempPath() + QStringLiteral("/my_com_trace.log");
+    QFile f(path);
+    const bool tooBig = QFileInfo::exists(path) && QFileInfo(path).size() > 512 * 1024;
+    if (!f.open(QIODevice::Append | (tooBig ? QIODevice::Truncate : QIODevice::Append)))
+        return;
+    f.write(QStringLiteral("[%1] %2\n")
+                .arg(QDateTime::currentDateTime().toString(QStringLiteral("HH:mm:ss.zzz")), line)
+                .toUtf8());
+}
+
+void TerminalPage::onRelayTick()
+{
+    // AI 中转：AI 的 CLI 把要发的帧写进 %TEMP%/my_com_ai_tx.txt，本页用自己
+    // 已打开的串口代发——COM 口独占下实现"AI 与人在同一串口协同调试"，
+    // 设备回复走本页正常接收路径（GUI-RX 进共享记录 + 接收区显示）
+    const QString path = QDir::tempPath() + QStringLiteral("/my_com_ai_tx.txt");
+    QFile f(path);
+    if (!f.exists())
+        return;
+    if (!f.open(QIODevice::ReadOnly))
+        return;
+    const QByteArray frame = f.readAll().trimmed();
+    f.close();
+    QFile::remove(path); // 先删后发：消费语义，避免重复发送
+    if (frame.isEmpty() || !m_port->isOpen())
+        return;
+    writeTrace(QStringLiteral("AI-RELAY-TX: %1").arg(QString::fromUtf8(frame)));
+    m_port->write(frame);
+}
+
+void TerminalPage::onWatchToggle(bool on)
+{
+    if (on) {
+        // 监视 AI 会话：AI 的 CLI 把收发追加写进 %TEMP%/my_com_trace.log，
+        // 这里每 500ms 读增量上屏——本页不打开串口，与 AI 同时使用互不冲突
+        QFile f(QDir::tempPath() + QStringLiteral("/my_com_trace.log"));
+        m_watchPos = (f.open(QIODevice::ReadOnly)) ? f.size() : 0;
+        appendRxText(QStringLiteral("[AI监视] 已开启：AI 会话的收发将实时显示（本页不占用串口）\n"),
+                     QColor(QStringLiteral("#7B68EE")));
+        m_watchTimer->start();
+    } else {
+        m_watchTimer->stop();
+        appendRxText(QStringLiteral("[AI监视] 已关闭\n"),
+                     QColor(QStringLiteral("#7B68EE")));
+    }
+}
+
+void TerminalPage::onWatchTick()
+{
+    QFile f(QDir::tempPath() + QStringLiteral("/my_com_trace.log"));
+    if (!f.open(QIODevice::ReadOnly))
+        return;
+    if (f.size() < m_watchPos) {
+        m_watchPos = f.size(); // 文件被截断重开：跳到末尾
+        return;
+    }
+    if (!f.seek(m_watchPos))
+        return;
+    const QByteArray added = f.read(f.size() - m_watchPos);
+    m_watchPos = f.pos();
+    if (added.isEmpty())
+        return;
+    // 按行上屏（用户要求：别每行都带 [AI]，用颜色区分）：
+    //   - AI 自己的动作行（AI-RELAY-TX/CLI-*）→ 带 [AI] 前缀
+    //   - 设备回复内容行（GUI-RX）→ 无前缀，紫色
+    //   - 人在界面发的行（GUI-TX）→ 无前缀，青色
+    //   - 会话标记 → 灰色 [AI]
+    //   - 其余（历史碎片/杂行）→ 白名单外，直接丢弃
+    // 时间戳跟随「时间戳」勾选框：剥掉共享记录自带的时间戳，
+    // appendRxText 会在勾选时统一加 [HH:mm:ss.mmm]，没勾就不显示
+    static const QRegularExpression tsRe(
+        QStringLiteral("^\\[\\d{2}:\\d{2}:\\d{2}\\.\\d{3}\\]\\s*"));
+    const QColor kAiPurple(QStringLiteral("#7B68EE"));
+    const QColor kTxTeal(QStringLiteral("#1F7A8C"));
+    const QColor kAiGray(QStringLiteral("#9A9A9A"));
+    const QStringList lines = QString::fromUtf8(added).split(QLatin1Char('\n'));
+    for (const QString& line : lines) {
+        QString clean = line.trimmed();
+        if (clean.isEmpty())
+            continue;
+        clean.remove(tsRe); // remove(QRegularExpression) 非 const，用副本
+        if (clean.startsWith(QStringLiteral("GUI-RX:"))) {
+            m_watchInText = false;
+            const QString content = clean.mid(7).trimmed();
+            if (!content.isEmpty())
+                appendRxText(content + QLatin1Char('\n'), kAiPurple);
+        } else if (clean.startsWith(QStringLiteral("GUI-TX:"))) {
+            m_watchInText = false;
+            const QString content = clean.mid(7).trimmed();
+            if (!content.isEmpty())
+                appendRxText(content + QLatin1Char('\n'), kTxTeal);
+        } else if (clean.startsWith(QStringLiteral("AI-RELAY-TX:"))) {
+            m_watchInText = false;
+            appendRxText(QStringLiteral("[AI] %1\n").arg(clean), kAiPurple);
+        } else if (clean.startsWith(QStringLiteral("=== AI 会话"))) {
+            m_watchInText = false;
+            appendRxText(QStringLiteral("[AI] %1\n").arg(clean), kAiGray);
+        } else if (clean.startsWith(QStringLiteral("CLI-ERROR"))) {
+            m_watchInText = false; // 错误信息不进监视显示（用户要求）——AI 自己读 cli.log
+        } else if (clean.startsWith(QStringLiteral("CLI-"))) {
+            m_watchInText = false;
+            appendRxText(QStringLiteral("[AI] %1\n").arg(clean), kAiGray);
+        } else if (clean.startsWith(QStringLiteral("TX ("))) {
+            // AI 发送行："TX (6/6 字节): @R20:0" → "[AI] TX: @R20:0"
+            m_watchInText = false;
+            const int p = clean.indexOf(QStringLiteral("): "));
+            appendRxText(QStringLiteral("[AI] TX: %1\n")
+                             .arg(p >= 0 ? clean.mid(p + 3) : clean),
+                         kAiPurple);
+        } else if (clean.startsWith(QStringLiteral("RX文本:"))) {
+            m_watchInText = true; // 进入内容块：后续无前缀行都是设备回复文本
+        } else if (clean.startsWith(QStringLiteral("RX ("))
+                   || clean.startsWith(QStringLiteral("TX-HEX"))) {
+            m_watchInText = false; // HEX 噪音行丢弃
+        } else if (m_watchInText) {
+            // RX文本 内容块内的行：无前缀、紫色（如 FMC PID / Project name 等）
+            appendRxText(clean + QLatin1Char('\n'), kAiPurple);
+        }
+        // 其余（历史碎片/杂行）不显示，保持监视窗口干净
+    }
+}
+
 void TerminalPage::addRightPanel(QWidget* widget)
 {
     // 追加为右侧第三栏（用户反馈：调试指令放右边更顺手）——分隔条可拖宽，
@@ -413,6 +553,7 @@ void TerminalPage::onOpenClose()
 {
     if (m_port->isOpen()) {
         m_portFaultPending = false; // 手动关闭不算异常断开，closed 处理不再红字提示
+        writeTrace(QStringLiteral("GUI-CLOSED"));
         m_port->close();
         return; // UI 复位由 closed 信号统一处理
     }
@@ -424,6 +565,8 @@ void TerminalPage::onOpenClose()
         return;
     }
     if (m_port->open(cfg)) {
+        // 共享记录：让 AI 知道 GUI 当前占用的串口（协同调试时端口变化也能感知）
+        writeTrace(QStringLiteral("GUI-OPEN: %1 @%2").arg(cfg.portName).arg(cfg.baud));
         // 记住本次成功参数，下次启动自动填入
         m_config->setValue(AppConfig::kLastPort, cfg.portName);
         m_config->setValue(AppConfig::kLastBaud, cfg.baud);
@@ -506,6 +649,13 @@ void TerminalPage::doSend(bool silent)
     const qint64 n = m_port->write(payload);
     if (n <= 0)
         return; // 失败细节由 errorOccurred 上报
+    // 共享记录：AI 能读到用户在 GUI 里发送的内容（去掉行尾控制字符）
+    {
+        QByteArray body = payload;
+        while (body.endsWith('\r') || body.endsWith('\n'))
+            body.chop(1);
+        writeTrace(QStringLiteral("GUI-TX: %1").arg(QString::fromUtf8(body)));
+    }
     emit txBytesWritten(n);
 }
 
@@ -547,6 +697,32 @@ void TerminalPage::onData(const QByteArray& data)
 {
     if (data.isEmpty())
         return;
+    // 共享记录：AI 能读到设备回给 GUI 的数据。按"完整行"聚合后再写文件——
+    // 设备回显按片到达（慢打印时一片只有几字节），逐片上屏会碎成断句（用户反馈）
+    {
+        QString text;
+        bool lastNl = false;
+        for (unsigned char c : data) {
+            if (c == '\r' || c == '\n') {
+                if (!lastNl)
+                    text.append(QLatin1Char('\n'));
+                lastNl = true;
+            } else if (c >= 0x20 && c < 0x7F) {
+                text.append(QLatin1Char(c));
+                lastNl = false;
+            }
+        }
+        m_traceRxBuf.append(text);
+        for (;;) {
+            const int nl = m_traceRxBuf.indexOf(QLatin1Char('\n'));
+            if (nl < 0)
+                break;
+            const QString line = m_traceRxBuf.left(nl).trimmed();
+            m_traceRxBuf.remove(0, nl + 1);
+            if (!line.isEmpty())
+                writeTrace(QStringLiteral("GUI-RX: %1").arg(line));
+        }
+    }
     if (m_pauseCheck->isChecked()) {
         m_pauseBuf.append(data); // 暂停：只攒不显示
         return;
@@ -600,6 +776,11 @@ void TerminalPage::updateOpenUi(bool open)
 {
     // 修复 C2：升级占用期间配置行与开关按钮一律禁用并显示"升级占用中"，
     // 即使引擎切换串口发出 opened/closed 也不恢复，避免用户按 UI 指引重开端口
+    // AI 中转轮询跟随真实串口状态：打开期间消费 AI 转发请求，关闭则停
+    if (open && !m_relayTimer->isActive())
+        m_relayTimer->start();
+    else if (!open)
+        m_relayTimer->stop();
     m_openBtn->setText(m_upgradeBusy ? QStringLiteral("升级占用中")
                                      : (open ? QStringLiteral("关闭串口")
                                              : QStringLiteral("打开串口")));

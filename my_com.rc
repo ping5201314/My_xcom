@@ -1,2 +1,29 @@
 // Windows 资源: exe 文件图标 (由 tools/make_icon.cpp 生成 my_com.ico, 7 尺寸)
 IDI_ICON1 ICON DISCARDABLE "my_com.ico"
+
+// exe 文件属性里的版本信息（资源管理器右键→属性可见）。
+// 注意: 数值与 src/version.h 的 MYCOM_VERSION_* 宏保持一致，改版时两处同步
+1 VERSIONINFO
+FILEVERSION 1,0,0,1
+PRODUCTVERSION 1,0,0,1
+FILEFLAGSMASK 0x3fL
+FILEFLAGS 0x0L
+FILEOS 0x40004L
+FILETYPE 0x1L
+FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "FileDescription", "my_com 串口助手"
+            VALUE "FileVersion", "1.0.0.1"
+            VALUE "ProductName", "my_com"
+            VALUE "ProductVersion", "1.0.0.1"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x804, 1200
+    END
+END
