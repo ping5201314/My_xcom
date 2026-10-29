@@ -111,12 +111,10 @@ void UpgradePage::updateFileInfo()
         bad << QStringLiteral("文件名为空");
     else if (nameBytes > UpgradeEngine::kMaxFileNameLen)
         nameTooLong = true;
-    // 大小（A6：≤120K，122K 硬上限）
+    // 大小（用户要求去掉 120K 限制：≤122K，与设备 APP1_SIZE 硬上限对齐）
     const qint64 size = fi.size();
     if (size <= 0)
         bad << QStringLiteral("文件为空");
-    else if (size > UpgradeEngine::kMaxFileSize)
-        bad << QStringLiteral("文件过大（%1 字节，需 ≤120K；122K 是设备硬上限）").arg(size);
 
     parts << QStringLiteral("<b>%1</b>").arg(base.toHtmlEscaped());
     if (size > 0)
@@ -143,12 +141,13 @@ void UpgradePage::onStart()
         setBanner(false, QStringLiteral("请先选择有效的 .bin 固件文件。"));
         return;
     }
-    if (fi.size() <= 0 || fi.size() > UpgradeEngine::kMaxFileSize) {
-        setBanner(false,
-                  QStringLiteral("文件大小 %1 字节，超出允许范围（≤120K，122K 是设备硬上限）。")
-                      .arg(fi.size()));
+    if (fi.size() <= 0) {
+        setBanner(false, QStringLiteral("文件为空，无法升级。"));
         return;
     }
+    if (fi.size() > UpgradeEngine::kMaxFileSize)
+        appendLog(QStringLiteral("警告：文件 %1 字节 超过设备 APP1_SIZE 硬上限（122K），设备可能拒绝写入。")
+                      .arg(fi.size()));
     // 文件名超长不再拦截：引擎/发送器会截断头包文件名（不影响升级，05c C3）
     saveSettings();
     setBanner(true, QString()); // 隐藏旧横幅

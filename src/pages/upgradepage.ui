@@ -17,7 +17,7 @@
    <item>
     <widget class="QGroupBox" name="fileBox">
      <property name="title">
-      <string>固件文件（.bin，≤120K）</string>
+      <string>固件文件（.bin）</string>
      </property>
      <layout class="QVBoxLayout" name="fileLay">
       <item>

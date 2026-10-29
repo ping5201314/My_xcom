@@ -37,7 +37,7 @@ const QString kCancelMessage = QStringLiteral(
 
 } // namespace
 
-UpgradeEngine::UpgradeEngine(SerialPort* port, QObject* parent)
+UpgradeEngine::UpgradeEngine(IUpgradePort* port, QObject* parent)
     : QObject(parent)
     , m_port(port)
 {
@@ -114,13 +114,15 @@ void UpgradeEngine::start(const QString& filePath, const QString& portName)
         return;
     }
     const qint64 size = fi.size();
-    if (size <= 0 || size > kMaxFileSize) {
-        log(QStringLiteral("文件大小 %1 字节，拒绝（允许范围 1~120K；122K 是设备硬上限，05c A6）")
-                .arg(size));
-        failEarly(QStringLiteral("文件大小 %1 字节，超出允许范围（≤120K）。"
-                                 "122K 是设备硬上限，请使用正确的固件镜像。")
-                      .arg(size));
+    if (size <= 0) {
+        log(QStringLiteral("文件大小 %1 字节，拒绝（文件为空）").arg(size));
+        failEarly(QStringLiteral("文件大小为 0，无法升级。"));
         return;
+    }
+    if (size > kMaxFileSize) {
+        // 用户要求：超过设备硬上限 122K 也不拒绝——只警告，设备侧自行裁决
+        log(QStringLiteral("警告：文件 %1 字节 超过设备 APP1_SIZE 硬上限（122K），设备可能拒绝写入。")
+                .arg(size));
     }
     const QString baseName = fi.fileName();
     // 文件名超长不再拒绝（用户反馈）：头包文件名不参与写 Flash（05c C3），
@@ -134,7 +136,7 @@ void UpgradeEngine::start(const QString& filePath, const QString& portName)
                            "（文件名不参与写 Flash，05c C3，不影响升级）")
                 .arg(baseName.toUtf8().size()));
     }
-    // 镜像一次读入内存（≤120K）：readFile 回调按序切块，避免传输中文件被替换/句柄失效
+    // 镜像一次读入内存：readFile 回调按序切块，避免传输中文件被替换/句柄失效
     {
         QFile f(filePath);
         if (!f.open(QIODevice::ReadOnly)) {

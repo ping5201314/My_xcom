@@ -2,7 +2,7 @@
 
 // 固件升级引擎：完整流程见 Finca/docs/05c_OTA审查_上位机.md 与 docs/需求分析.md 附录A。
 // 目标流程：
-//   前置校验（≤120K、文件名 ≤31）→ 强制串口 115200 8N1 → beginExclusive
+//   前置校验（文件非空、文件名 ≤31）→ 强制串口 115200 8N1 → beginExclusive
 //   → 发 @W12:0000. → 等 'C' ≤30s → YmodemSender::run()（128B 块 / EOT×2 / 空块）
 //   → endExclusive → 静默 10s（设备复位、BOOT 搬运 3~6s，可能重枚举 USB 串口）
 //   → beginExclusive → 轮询 @R20:0（每 500ms ≤30s）比对期望版本号
@@ -26,14 +26,14 @@
 #include "serial/serialconfig.h" // 值成员 m_origCfg 需要完整类型
 #include "upgrade/ymodem.h"
 
-class SerialPort;
+class IUpgradePort;
 class QThread;
 
 class UpgradeEngine : public QObject
 {
     Q_OBJECT
 public:
-    explicit UpgradeEngine(SerialPort* port, QObject* parent = nullptr);
+    explicit UpgradeEngine(IUpgradePort* port, QObject* parent = nullptr);
     ~UpgradeEngine() override;
 
     /// 是否忙（含冷却期）。UI 线程读安全（原子）。
@@ -42,7 +42,7 @@ public:
     // 协议与流程常量（依据：Finca/docs/05c_OTA审查_上位机.md，逐条注释出处）。
     // 修复 Minor 7：升级页前置校验与引擎共用同一份定义（此前 upgradepage.cpp
     // 与 upgradeengine.cpp 双处维护，注释"与引擎一致"恰恰说明有漂移风险）。
-    static constexpr int kMaxFileSize = 120 * 1024;   // 接受上限 120K（A6：122K 是设备硬上限，留余量）
+    static constexpr int kMaxFileSize = 122 * 1024;   // 接受上限 122K（用户要求去掉 120K 限制；与设备 APP1_SIZE=0x1E800 硬上限对齐）
     static constexpr int kMaxFileNameLen = 31;        // A7/D9：接收端 filename[32] 缓冲
     static constexpr int kMaxRounds = 3;              // 最多 3 轮（B5：2~3 轮后报现场故障）
     static constexpr int kRoundBudgetMs = 120000;     // 单轮总超时 120s（B5）
@@ -90,7 +90,7 @@ private:
     // 日志，残尾留在缓冲（用户反馈：逐片上屏会碎成断句）
     void logRxBytes(const QByteArray& data);
 
-    SerialPort* m_port;
+    IUpgradePort* m_port;
     QThread* m_thread = nullptr;
     mycom::YmodemSender m_sender;
 
@@ -98,7 +98,7 @@ private:
     std::atomic<bool> m_cancelFlag{false};
 
     // 以下成员仅工作线程访问（start() 全程在工作线程执行），无并发问题
-    QByteArray m_image;                 // 镜像内容（≤120K，一次读入内存，readFile 回调按序切块）
+    QByteArray m_image;                 // 镜像内容（一次读入内存，readFile 回调按序切块；大小不设上限）
     qint64 m_imageOff = 0;              // 镜像读取游标
     SerialConfig m_origCfg;             // 升级前配置快照
     bool m_origWasOpen = false;

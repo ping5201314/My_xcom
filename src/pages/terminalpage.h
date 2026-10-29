@@ -13,8 +13,9 @@
 
 #include <optional>
 
+#include "config/appconfig.h" // SendHistory 值成员需要完整定义（升级页同款 include 风格）
+
 class SerialPort;
-class AppConfig;
 class QComboBox;
 class QPushButton;
 class QPlainTextEdit;
@@ -66,6 +67,7 @@ private slots:
     void onError(const QString& msg);
     void onSaveLog();
     void onViewModeChanged(int idx);
+    void onHistorySelected(int idx); // 历史下拉选中：回填发送框并复位到占位首项
     void onWatchToggle(bool on); // 监视 AI 会话：读共享跟踪文件，不占串口
     void onWatchTick();          // 500ms 轮询跟踪文件增量并上屏
 
@@ -73,6 +75,8 @@ private:
     void buildUi();
     void loadSettings();
     void rebuildDecoder();
+    void rebuildHistoryCombo();  // 用 m_history 重建下拉（占位首项 + 历史条目）
+    void updateHistoryEnabled(); // 升级占用/循环运行期间禁用历史下拉
     SerialConfig currentConfig() const;
     bool parseHexInput(const QString& text, QByteArray* out, QString* err) const;
     QByteArray sendLineEnding() const;
@@ -110,6 +114,7 @@ private:
     QCheckBox* m_scrollCheck;
     QCheckBox* m_pauseCheck;
     QCheckBox* m_watchCheck;  // 监视 AI 会话（读 %TEMP%/my_com_trace.log，不占串口）
+    QCheckBox* m_showTxCheck; // 显示发送数据（接收区青色显示人发/AI 发的帧）
     QTimer* m_watchTimer = nullptr; // 监视轮询定时器
     qint64 m_watchPos = 0;    // 跟踪文件已读位置
     QTimer* m_relayTimer = nullptr; // AI 中转轮询：读 %TEMP%/my_com_ai_tx.txt 并代发
@@ -120,6 +125,7 @@ private:
     QPushButton* m_saveBtn;
 
     // ---- 发送区 ----
+    QComboBox* m_historyCombo; // 发送历史下拉（首项占位提示；选中只回填不发送）
     QPlainTextEdit* m_txEdit;
     QComboBox* m_txModeCombo; // 文本/HEX
     QComboBox* m_eolCombo;    // 无/CRLF/LF/CR
@@ -130,6 +136,8 @@ private:
     QTimer* m_loopTimer;
 
     // ---- 状态 ----
+    // 发送历史：手动发送成功才记录（循环发送不记），去重移前/上限 50，ini 持久化
+    SendHistory m_history;
     bool m_upgradeBusy = false; // 修复 C2：升级占用期间忽略 closed/opened 信号、禁用全部交互
     QByteArray m_pauseBuf;  // 暂停显示期间攒的数据
     QByteArray m_hexBuf;    // HEX 显示凑 16 字节一行的残余

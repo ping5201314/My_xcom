@@ -20,7 +20,7 @@ struct DebugCommand {
 // 调试面板把指令对象存进 QTreeWidgetItem 的 UserRole，需要元类型注册
 Q_DECLARE_METATYPE(DebugCommand)
 
-/// 调试指令表模型：从 commands/debug_commands.json 加载分组与指令
+/// 调试指令表模型：从指令表文件（CSV 为主，JSON 兼容）加载分组与指令
 class DebugCommandModel
 {
 public:
@@ -32,6 +32,12 @@ public:
 
     bool load(const QString& jsonPath);
     bool save(const QString& jsonPath) const; // 按分组重建 JSON 写盘（编辑对话框用）
+    // CSV 指令表（2026-10-21 用户拍板，用 Excel 直接编辑）：
+    // 6 列「分组,名称,发送内容,带参数,默认参数,参数提示」，带参数写 是/否；
+    // 写盘带 UTF-8 BOM（Excel 任意区域双击中文不乱码），读入自动识别
+    // UTF-8(BOM/无 BOM)/GBK（Excel 中文系统另存为 CSV 的默认编码）与 RFC4180 引号字段
+    bool loadCsv(const QString& csvPath);
+    bool saveCsv(const QString& csvPath) const;
     QStringList groups() const;
     QVector<DebugCommand> commandsOf(const QString& group) const;
     QVector<Entry> entries() const;              // 全量导出（含分组名）

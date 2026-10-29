@@ -1,0 +1,2 @@
+// 启动器图标：复用主程序 my_com.ico（路径相对本文件所在目录）
+IDI_ICON1 ICON DISCARDABLE "../../my_com.ico"

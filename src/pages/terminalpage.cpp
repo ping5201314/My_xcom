@@ -89,6 +89,7 @@ void TerminalPage::setUpgradeBusy(bool busy)
     m_intervalSpin->setEnabled(!busy);
     m_loopBtn->setEnabled(!busy);
     m_clearTxBtn->setEnabled(!busy);
+    updateHistoryEnabled(); // 历史下拉随发送区一起禁用/恢复
     // 配置行 + 开关按钮：占用期间全禁用；结束时按真实串口状态恢复
     updateOpenUi(busy ? false : m_port->isOpen());
 }
@@ -196,6 +197,18 @@ void TerminalPage::buildUi()
     txRow3->addWidget(new QLabel(QStringLiteral("循环间隔"), txBox));
     txRow3->addWidget(m_intervalSpin, 1);
     txLay->addLayout(txRow3);
+    // 发送历史下拉（2026-10-20 拍板，10-21 用户调整位置：放到发送区最后面——
+    // 发送框之后）：手动发送成功后自动记录（最新在前、最多 50 条，循环发送不记录），
+    // 选中只回填、不自动发送
+    auto* histRow = new QHBoxLayout;
+    histRow->addWidget(new QLabel(QStringLiteral("历史"), txBox));
+    m_historyCombo = new QComboBox(txBox);
+    m_historyCombo->addItem(QStringLiteral("— 选择历史填入发送框 —")); // 占位首项
+    m_historyCombo->setToolTip(QStringLiteral("发送历史：手动发送成功后自动记录"
+                                              "（最新在前，最多 50 条，循环发送不记录）。"
+                                              "选中填入发送框，不自动发送；HEX 内容需在 HEX 输入模式下发送才保持原义"));
+    histRow->addWidget(m_historyCombo, 1);
+    txLay->addLayout(histRow);
     sideLay->addWidget(txBox, 1);
 
     m_splitter->addWidget(sidebar);
@@ -221,6 +234,8 @@ void TerminalPage::buildUi()
     m_scrollCheck = new QCheckBox(QStringLiteral("自动滚动"), rxBox);
     m_pauseCheck = new QCheckBox(QStringLiteral("暂停显示"), rxBox);
     m_pauseCheck->setToolTip(QStringLiteral("暂停时数据仍接收并计数，恢复后一次性补显"));
+    m_showTxCheck = new QCheckBox(QStringLiteral("显示发送"), rxBox);
+    m_showTxCheck->setToolTip(QStringLiteral("接收区用青色显示发送的帧（人在界面发与 AI 中转发）；关闭只显示接收"));
     m_watchCheck = new QCheckBox(QStringLiteral("监视AI会话"), rxBox);
     m_watchCheck->setToolTip(
         QStringLiteral("AI 通过命令行控制串口时，这里实时显示它的收发（不占用串口）"));
@@ -242,6 +257,7 @@ void TerminalPage::buildUi()
     rxTool->addWidget(m_tsCheck);
     rxTool->addWidget(m_scrollCheck);
     rxTool->addWidget(m_pauseCheck);
+    rxTool->addWidget(m_showTxCheck);
     rxTool->addWidget(m_watchCheck);
     rxTool->addWidget(m_clearRxBtn);
     rxTool->addWidget(m_saveBtn);
@@ -270,6 +286,9 @@ void TerminalPage::buildUi()
         m_lineStart = true; // 清空后插入点回到行首
     });
     connect(m_clearTxBtn, &QPushButton::clicked, this, [this] { m_txEdit->clear(); });
+    // 用 activated 而非 currentIndexChanged：只在用户选中时触发，回填后程序复位到
+    // 占位首项不会误触——同一历史项可重复选择
+    connect(m_historyCombo, &QComboBox::activated, this, &TerminalPage::onHistorySelected);
     connect(m_saveBtn, &QPushButton::clicked, this, &TerminalPage::onSaveLog);
     connect(m_viewCombo, &QComboBox::currentIndexChanged, this, &TerminalPage::onViewModeChanged);
     connect(m_encodingCombo, &QComboBox::currentTextChanged, this, [this](const QString&) {
@@ -287,6 +306,7 @@ void TerminalPage::buildUi()
     // 选项变更即落盘（写入量极小）
     connect(m_tsCheck, &QCheckBox::toggled, this, [this](bool) { saveSettings(); });
     connect(m_scrollCheck, &QCheckBox::toggled, this, [this](bool) { saveSettings(); });
+    connect(m_showTxCheck, &QCheckBox::toggled, this, [this](bool) { saveSettings(); });
     connect(m_txModeCombo, &QComboBox::currentIndexChanged, this, [this](int) { saveSettings(); });
     connect(m_eolCombo, &QComboBox::currentIndexChanged, this, [this](int) { saveSettings(); });
     connect(m_intervalSpin, &QSpinBox::valueChanged, this, [this](int) { saveSettings(); });
@@ -317,9 +337,13 @@ void TerminalPage::loadSettings()
     rebuildDecoder();
     m_tsCheck->setChecked(m_config->boolValue(AppConfig::kTimestamp, false));
     m_scrollCheck->setChecked(m_config->boolValue(AppConfig::kAutoScroll, true));
+    m_showTxCheck->setChecked(m_config->boolValue(AppConfig::kShowTx, true));
     m_txModeCombo->setCurrentIndex(m_config->boolValue(AppConfig::kSendHex, false) ? 1 : 0);
     m_eolCombo->setCurrentIndex(m_config->intValue(AppConfig::kLineEnding, 1)); // 默认 CRLF
     m_intervalSpin->setValue(m_config->intValue(AppConfig::kLoopInterval, 1000));
+    // 发送历史：启动时从 ini 载入（键 ui/sendHistory，最新在前）
+    m_history.load(*m_config);
+    rebuildHistoryCombo();
 }
 
 void TerminalPage::saveSettings()
@@ -334,6 +358,7 @@ void TerminalPage::saveSettings()
     m_config->setValue(AppConfig::kHexView, m_viewCombo->currentIndex() == 1);
     m_config->setValue(AppConfig::kTimestamp, m_tsCheck->isChecked());
     m_config->setValue(AppConfig::kAutoScroll, m_scrollCheck->isChecked());
+    m_config->setValue(AppConfig::kShowTx, m_showTxCheck->isChecked());
     m_config->setValue(AppConfig::kEncoding, m_encodingCombo->currentText());
     m_config->setValue(AppConfig::kSendHex, m_txModeCombo->currentIndex() == 1);
     m_config->setValue(AppConfig::kLineEnding, m_eolCombo->currentIndex());
@@ -423,9 +448,36 @@ void TerminalPage::writeTrace(const QString& line)
 
 void TerminalPage::onRelayTick()
 {
-    // AI 中转：AI 的 CLI 把要发的帧写进 %TEMP%/my_com_ai_tx.txt，本页用自己
-    // 已打开的串口代发——COM 口独占下实现"AI 与人在同一串口协同调试"，
-    // 设备回复走本页正常接收路径（GUI-RX 进共享记录 + 接收区显示）
+    // 升级中转会话期间提速轮询（CLI 逐帧等待消费，500ms 会让整轮超预算），
+    // 平时恢复 500ms 常态
+    const QString flagPath = QDir::tempPath() + QStringLiteral("/my_com_ai_relay.flag");
+    const int wantMs = QFile::exists(flagPath) ? 30 : 500;
+    if (m_relayTimer->interval() != wantMs)
+        m_relayTimer->setInterval(wantMs);
+
+    // ① 新协议（升级中转向）：.part 全量数据 + .rdy 就绪标记，CLI 写完 .part 才落 .rdy，
+    //    本页只在 .rdy 存在时读 .part，杜绝半包；读后代发并删除两文件
+    const QString partPath = QDir::tempPath() + QStringLiteral("/my_com_ai_tx.part");
+    const QString rdyPath = QDir::tempPath() + QStringLiteral("/my_com_ai_tx.rdy");
+    if (QFile::exists(rdyPath)) {
+        QByteArray frame;
+        QFile part(partPath);
+        if (part.open(QIODevice::ReadOnly)) {
+            frame = part.readAll();
+            part.close();
+        }
+        QFile::remove(rdyPath);
+        QFile::remove(partPath);
+        if (frame.isEmpty() || !m_port->isOpen())
+            return;
+        writeTrace(QStringLiteral("AI-RELAY-TX: %1 字节").arg(frame.size()));
+        m_port->write(frame);
+        return;
+    }
+
+    // ② 旧协议（relay-send 兼容）：AI 的 CLI 把文本帧写进 %TEMP%/my_com_ai_tx.txt，
+    //    本页用自己已打开的串口代发——COM 口独占下实现"AI 与人在同一串口协同调试"，
+    //    设备回复走本页正常接收路径（GUI-RX 进共享记录 + 接收区显示）
     const QString path = QDir::tempPath() + QStringLiteral("/my_com_ai_tx.txt");
     QFile f(path);
     if (!f.exists())
@@ -499,12 +551,15 @@ void TerminalPage::onWatchTick()
                 appendRxText(content + QLatin1Char('\n'), kAiPurple);
         } else if (clean.startsWith(QStringLiteral("GUI-TX:"))) {
             m_watchInText = false;
-            const QString content = clean.mid(7).trimmed();
-            if (!content.isEmpty())
-                appendRxText(content + QLatin1Char('\n'), kTxTeal);
+            if (m_showTxCheck->isChecked()) {
+                const QString content = clean.mid(7).trimmed();
+                if (!content.isEmpty())
+                    appendRxText(content + QLatin1Char('\n'), kTxTeal);
+            }
         } else if (clean.startsWith(QStringLiteral("AI-RELAY-TX:"))) {
             m_watchInText = false;
-            appendRxText(QStringLiteral("[AI] %1\n").arg(clean), kAiPurple);
+            if (m_showTxCheck->isChecked())
+                appendRxText(QStringLiteral("[AI] %1\n").arg(clean), kAiPurple);
         } else if (clean.startsWith(QStringLiteral("=== AI 会话"))) {
             m_watchInText = false;
             appendRxText(QStringLiteral("[AI] %1\n").arg(clean), kAiGray);
@@ -516,10 +571,12 @@ void TerminalPage::onWatchTick()
         } else if (clean.startsWith(QStringLiteral("TX ("))) {
             // AI 发送行："TX (6/6 字节): @R20:0" → "[AI] TX: @R20:0"
             m_watchInText = false;
-            const int p = clean.indexOf(QStringLiteral("): "));
-            appendRxText(QStringLiteral("[AI] TX: %1\n")
-                             .arg(p >= 0 ? clean.mid(p + 3) : clean),
-                         kAiPurple);
+            if (m_showTxCheck->isChecked()) {
+                const int p = clean.indexOf(QStringLiteral("): "));
+                appendRxText(QStringLiteral("[AI] TX: %1\n")
+                                 .arg(p >= 0 ? clean.mid(p + 3) : clean),
+                             kAiPurple);
+            }
         } else if (clean.startsWith(QStringLiteral("RX文本:"))) {
             m_watchInText = true; // 进入内容块：后续无前缀行都是设备回复文本
         } else if (clean.startsWith(QStringLiteral("RX ("))
@@ -649,14 +706,68 @@ void TerminalPage::doSend(bool silent)
     const qint64 n = m_port->write(payload);
     if (n <= 0)
         return; // 失败细节由 errorOccurred 上报
+    if (!silent) {
+        // 手动发送成功才记历史（2026-10-20 拍板）：循环发送（silent）逐次都不记；
+        // 失败路径（未开串口/HEX 非法/写失败/空输入）在上面已 return，走不到这里。
+        // 存发送框原文——HEX 模式存 HEX 文本本身，回填不切换输入模式
+        m_history.add(m_txEdit->toPlainText());
+        m_history.save(*m_config); // 即时落盘：关闭软件后保留
+        rebuildHistoryCombo();
+    }
     // 共享记录：AI 能读到用户在 GUI 里发送的内容（去掉行尾控制字符）
     {
         QByteArray body = payload;
         while (body.endsWith('\r') || body.endsWith('\n'))
             body.chop(1);
         writeTrace(QStringLiteral("GUI-TX: %1").arg(QString::fromUtf8(body)));
+        if (m_showTxCheck->isChecked()) {
+            // 跟随接收区的 文本/HEX 显示模式(用户要求:发送显示与接收视图同步)
+            if (m_viewCombo->currentIndex() == 1) {
+                appendRxText(QString::fromLatin1(payload.toHex(' ').toUpper())
+                                 + QLatin1Char('\n'),
+                             QColor(QStringLiteral("#1F7A8C")));
+            } else {
+                QStringDecoder txDec(m_encoding.toLatin1().constData());
+                if (!txDec.isValid())
+                    txDec = QStringDecoder(QStringDecoder::Utf8);
+                appendRxText(txDec.decode(QByteArrayView(payload.constData(), payload.size()))
+                                 + QLatin1Char('\n'),
+                             QColor(QStringLiteral("#1F7A8C")));
+            }
+        }
     }
     emit txBytesWritten(n);
+}
+
+void TerminalPage::rebuildHistoryCombo()
+{
+    // 第 0 项固定为占位提示，随后是历史条目（最新在前）。重建后复位到占位项，
+    // 与 activated 信号配合：同一历史项可重复选择
+    m_historyCombo->clear();
+    m_historyCombo->addItem(QStringLiteral("— 选择历史填入发送框 —"));
+    const QStringList items = m_history.list();
+    for (int i = 0; i < items.size(); ++i) {
+        m_historyCombo->addItem(items.at(i));
+        // 长条目/多行条目在框里会被省略，tooltip 显示完整内容
+        m_historyCombo->setItemData(i + 1, items.at(i), Qt::ToolTipRole);
+    }
+    m_historyCombo->setCurrentIndex(0);
+}
+
+void TerminalPage::onHistorySelected(int idx)
+{
+    if (idx <= 0)
+        return; // 占位首项
+    // 选中 → 回填发送框，不自动发送（用户再点“发送”或回车）；随即复位到占位项
+    m_txEdit->setPlainText(m_historyCombo->itemText(idx));
+    m_historyCombo->setCurrentIndex(0);
+}
+
+void TerminalPage::updateHistoryEnabled()
+{
+    // 升级占用与循环发送运行期间禁用历史下拉（选中会改写发送框，避免与运行中
+    // 状态纠缠——需求：发送禁用期间历史下拉跟随禁用）
+    m_historyCombo->setEnabled(!m_upgradeBusy && !m_loopTimer->isActive());
 }
 
 void TerminalPage::onLoopToggle()
@@ -678,6 +789,7 @@ void TerminalPage::onLoopToggle()
     updateOpenUi(true);
     m_openBtn->setEnabled(false);
     m_refreshBtn->setEnabled(false);
+    updateHistoryEnabled(); // 循环运行中历史下拉禁用（回填会打断正在循环发送的内容）
 }
 
 void TerminalPage::stopLoop()
@@ -686,6 +798,7 @@ void TerminalPage::stopLoop()
     m_loopBtn->setText(QStringLiteral("循环发送"));
     m_intervalSpin->setEnabled(true);
     updateOpenUi(m_port->isOpen());
+    updateHistoryEnabled();
 }
 
 void TerminalPage::onLoopTimeout()
@@ -697,6 +810,18 @@ void TerminalPage::onData(const QByteArray& data)
 {
     if (data.isEmpty())
         return;
+    // 升级中转会话期间：把设备回包的原始字节镜像到 RX 文件，CLI 升级轮询读取
+    // （用户要求：GUI 连接串口时不影响终端使用——升级无需再关 GUI 串口）
+    if (QFile::exists(QDir::tempPath() + QStringLiteral("/my_com_ai_relay.flag"))) {
+        const QString rxPath = QDir::tempPath() + QStringLiteral("/my_com_ai_rx.txt");
+        QFile rx(rxPath);
+        if (rx.open(QIODevice::ReadWrite | QIODevice::Append)) {
+            if (rx.size() > 1024 * 1024)
+                rx.resize(0); // 超限截断（CLI 侧检测到文件变短会从 0 重新读）
+            rx.write(data);
+            rx.close();
+        }
+    }
     // 共享记录：AI 能读到设备回给 GUI 的数据。按"完整行"聚合后再写文件——
     // 设备回显按片到达（慢打印时一片只有几字节），逐片上屏会碎成断句（用户反馈）
     {

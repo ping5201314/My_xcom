@@ -16,6 +16,7 @@
 #include <atomic>
 #include <mutex>
 
+#include "serial/iupgradeport.h"
 #include "serial/serialconfig.h" // 值成员 m_cfg 需要完整类型（该头不依赖 windows.h，可安全包含）
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -28,7 +29,7 @@
 
 class QThread;
 
-class SerialPort : public QObject
+class SerialPort : public QObject, public IUpgradePort
 {
     Q_OBJECT
 public:

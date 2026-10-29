@@ -1,7 +1,9 @@
 // DebugCommandModel 单元测试（T4）：合法 JSON 分组/带参字段解析、缺失文件返回 false
-//（面板侧据此回退内置默认集）、损坏 JSON / 非对象 JSON / groups 缺失与类型错误不崩溃、
-// 空 send 指令的模型层容错。临时 JSON 用 QTemporaryDir 写入，作用域结束自动清理 ——
-// 确定性、不污染项目目录。
+//（面板侧据此显示空白表格与占位提示，不回退内置指令集）、损坏 JSON / 非对象 JSON /
+// groups 缺失与类型错误不崩溃、空 send 指令的模型层容错。临时 JSON 用 QTemporaryDir
+// 写入，作用域结束自动清理 —— 确定性、不污染项目目录。
+// 2026-10-21 增补 CSV 指令表用例：6 列往返（特殊字符/是/否/BOM）、GBK 无 BOM 读入、
+// 表头/空行/缺列/坏行容错。
 // 框架约定同 my_com_tests：CHECK 宏 + 失败计数；入口 run_debugcmd_tests() 由 qt_test_main 调用。
 
 #include <QFile>
@@ -9,6 +11,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QTemporaryDir>
+#include <QStringEncoder>
 #include <QStringList>
 #include <QVector>
 
@@ -101,7 +104,7 @@ static void testValidJsonGroupsAndParams()
 
 static void testMissingFileReturnsFalse()
 {
-    // 缺失文件 → load false（DebugPanel 以 load false 触发内置默认集回退，面板测试覆盖）。
+    // 缺失文件 → load false（DebugPanel 以 load false 显示空白表格与占位提示，面板测试覆盖）。
     // 用“写后即删”的临时路径，保证确定性缺失（不依赖盘符是否存在）。
     const QString path = writeTempJson("{}", "cmd_gone.json");
     QFile::remove(path);
@@ -124,7 +127,7 @@ static void testCorruptedJsonNoCrash()
         const QString path = writeTempJson("[1,2,3]", "cmd_arr.json");
         CHECK(!path.isEmpty() && !m.load(path), "非对象 JSON（数组）→ load false");
     }
-    // ③ 对象但 groups 缺失：load 视为“空指令表”成功（面板以 groups 空触发回退）
+    // ③ 对象但 groups 缺失：load 视为“空指令表”成功（面板以 groups 空显示空白表格）
     {
         const QString path = writeTempJson("{}", "cmd_empty.json");
         DebugCommandModel m2;
@@ -210,6 +213,100 @@ static void testSaveLoadRoundTrip()
           "带参指令字段逐项往返一致");
 }
 
+static void testCsvSaveLoadRoundTrip()
+{
+    // CSV 指令表（2026-10-21 用户拍板，Excel 可编辑）：6 列、是/否、RFC4180 引号
+    // 字段（逗号/引号/换行）、UTF-8 BOM 写盘，逐字段往返一致
+    DebugCommandModel m;
+    QVector<DebugCommandModel::Entry> es;
+    {
+        DebugCommand c;
+        c.name = QStringLiteral("版本信息");
+        c.send = QStringLiteral("@R20:0");
+        es.append({QStringLiteral("基础"), c});
+    }
+    {
+        DebugCommand c;
+        c.name = QStringLiteral("标定电压");
+        c.send = QStringLiteral("@W21:%1.");
+        c.hasParam = true;
+        c.paramDefault = QStringLiteral("0230");
+        c.paramHint = QStringLiteral("电压(0.1V)，含,逗号\"引号\"和\n换行"); // 特殊字符全上
+        es.append({QStringLiteral("校准"), c});
+    }
+    m.setEntries(es);
+
+    const QString path = writeTempJson(QByteArray(), "cmd_roundtrip.csv");
+    CHECK(m.saveCsv(path), "saveCsv 写临时文件成功");
+
+    // BOM 校验：Excel 任意语言区域双击打开中文不乱码的前提
+    QFile f(path);
+    CHECK(f.open(QIODevice::ReadOnly), "CSV 文件可打开");
+    const QByteArray bytes = f.readAll();
+    CHECK(bytes.startsWith("\xEF\xBB\xBF"), "CSV 写盘带 UTF-8 BOM");
+
+    DebugCommandModel m2;
+    CHECK(m2.loadCsv(path), "saveCsv 产物可 loadCsv");
+    CHECK(m2.groups() == QStringList({QStringLiteral("基础"), QStringLiteral("校准")}),
+          "CSV 分组按出现顺序重建");
+    const QVector<DebugCommand> cal = m2.commandsOf(QStringLiteral("校准"));
+    CHECK(cal.size() == 1 && cal[0].hasParam && cal[0].paramDefault == QStringLiteral("0230")
+              && cal[0].paramHint == QStringLiteral("电压(0.1V)，含,逗号\"引号\"和\n换行"),
+          "特殊字符（逗号/引号/换行/中文）CSV 往返一致");
+    const QVector<DebugCommand> base = m2.commandsOf(QStringLiteral("基础"));
+    CHECK(base.size() == 1 && base[0].name == QStringLiteral("版本信息") && !base[0].hasParam,
+          "无参指令 是/否 列往返为 false");
+}
+
+static void testCsvGbkFallback()
+{
+    // Excel 中文系统「另存为 CSV」默认 GBK 无 BOM：读入必须兼容
+    QStringEncoder gbk("GBK");
+    if (!gbk.isValid()) {
+        printf("SKIP: 无 ICU，GBK 编码器不可用，跳过 GBK CSV 用例\n");
+        return;
+    }
+    const QString content = QStringLiteral(
+        "分组,名称,发送内容,带参数,默认参数,参数提示\n"
+        "基础,通道回显,@R01:0,否,,\n"
+        "校准,设定压力,@W05:%1.,是,0900,萃取压力\n");
+    const QByteArray gb = gbk.encode(content);
+    const QString path = writeTempJson(gb, "cmd_gbk.csv");
+    DebugCommandModel m;
+    CHECK(m.loadCsv(path), "GBK 无 BOM CSV 加载成功");
+    CHECK(m.groups() == QStringList({QStringLiteral("基础"), QStringLiteral("校准")}),
+          "GBK CSV 分组解析正确");
+    const QVector<DebugCommand> cal = m.commandsOf(QStringLiteral("校准"));
+    CHECK(cal.size() == 1 && cal[0].hasParam && cal[0].paramDefault == QStringLiteral("0900"),
+          "GBK CSV 带参字段解析正确");
+}
+
+static void testCsvTolerance()
+{
+    // 表头跳过/空行跳过/缺列行跳过/坏行跳过/带参数取值宽容（是/1/true）
+    const QString content = QStringLiteral(
+        "分组,名称,发送内容,带参数,默认参数,参数提示\n"
+        "\n"
+        "基础,版本信息,@R20:0,否,,\n"
+        "坏行无发送,,,,\n"
+        "缺列行,只有三列,@R01:0\n"
+        "校准,压力1,{send},是,0900,提示\n"
+        "校准,压力2,{send},1,0901,提示\n"
+        "校准,压力3,{send},true,0902,提示\n"
+        "校准,压力4,{send},随便,0903,提示\n");
+    const QString path = writeTempJson(content.toUtf8(), "cmd_tol.csv");
+    DebugCommandModel m;
+    CHECK(m.loadCsv(path), "容错 CSV 加载成功");
+    CHECK(m.groups() == QStringList({QStringLiteral("基础"), QStringLiteral("校准")}),
+          "坏行/空行/缺列行被跳过，分组仅剩有效行");
+    CHECK(m.commandsOf(QStringLiteral("基础")).size() == 1, "有效无参行保留");
+    const QVector<DebugCommand> cal = m.commandsOf(QStringLiteral("校准"));
+    CHECK(cal.size() == 4, "校准组 4 条有效行");
+    CHECK(cal[0].hasParam && cal[1].hasParam && cal[2].hasParam,
+          "带参数列 是/1/true 均解析为 true");
+    CHECK(!cal[3].hasParam, "带参数列其它值解析为 false");
+}
+
 int run_debugcmd_tests()
 {
     testValidJsonGroupsAndParams();
@@ -217,6 +314,9 @@ int run_debugcmd_tests()
     testCorruptedJsonNoCrash();
     testEmptySendTolerance();
     testSaveLoadRoundTrip();
+    testCsvSaveLoadRoundTrip();
+    testCsvGbkFallback();
+    testCsvTolerance();
     printf("SECTION debugcmd: %d PASSED, %d FAILED\n", g_passes, g_failures);
     return g_failures;
 }

@@ -11,16 +11,30 @@
 int run_debugcmd_tests();
 int run_serialconfig_tests();
 int run_debugpanel_tests();
+int run_sendhistory_tests();
+int run_commandeditor_tests();
 
 int main(int argc, char* argv[])
 {
     qputenv("QT_QPA_PLATFORM", QByteArrayLiteral("offscreen"));
     QApplication app(argc, argv);
 
+    // 排障用：单节运行（ctest 不加参数，全量跑）
+    if (argc > 1 && qstrcmp(argv[1], "debugcmd") == 0)
+        return run_debugcmd_tests();
+    if (argc > 1 && qstrcmp(argv[1], "debugpanel") == 0)
+        return run_debugpanel_tests();
+    if (argc > 1 && qstrcmp(argv[1], "sendhistory") == 0)
+        return run_sendhistory_tests();
+    if (argc > 1 && qstrcmp(argv[1], "commandeditor") == 0)
+        return run_commandeditor_tests();
+
     int fails = 0;
     fails += run_debugcmd_tests();
     fails += run_serialconfig_tests();
     fails += run_debugpanel_tests();
+    fails += run_sendhistory_tests();
+    fails += run_commandeditor_tests();
     if (fails)
         printf("RESULT: %d FAILED\n", fails);
     else

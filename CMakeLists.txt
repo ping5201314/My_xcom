@@ -32,6 +32,7 @@ qt_add_executable(my_com MANUAL_FINALIZATION
     src/mainwindow.cpp
     src/serial/serialconfig.h
     src/serial/serialconfig.cpp
+    src/serial/relayport.cpp
     src/serial/serialport.h
     src/serial/serialport.cpp
     src/pages/terminalpage.h
@@ -91,19 +92,24 @@ if(MYCOM_BUILD_TESTS)
     target_link_libraries(my_com_tests PRIVATE mycom_proto)
     add_test(NAME my_com_tests COMMAND my_com_tests)
 
-    # Qt 层单元测试（T4）：DebugCommandModel / SerialConfig / DebugPanel（经 AUTOMOC）。
-    # 输出到独立子目录 build/.../tests —— DebugPanel 的“JSON 缺失回退默认集”路径
-    # 依赖 exe 目录无 debug_commands.json，独立目录保证该路径确定性可测。
+    # Qt 层单元测试（T4/T11）：DebugCommandModel / SerialConfig / DebugPanel / SendHistory
+    # （经 AUTOMOC）。输出到独立子目录 build/.../tests —— DebugPanel 指令表路径与
+    # SendHistory 的 ini 全部注入临时目录（QTemporaryDir），与 exe 目录和真实
+    # %APPDATA% 隔离，保证测试确定性与用户数据不被污染。
     add_executable(my_com_qt_tests
         tests/qt_test_main.cpp
         tests/test_debugcmd.cpp
         tests/test_serialconfig.cpp
         tests/test_debugpanel.cpp
+        tests/test_sendhistory.cpp
+        tests/test_commandeditor.cpp
         src/debugcmd/debugcommand.cpp
         src/debugcmd/commandeditor.h
         src/debugcmd/commandeditor.cpp
         src/serial/serialconfig.cpp
+    src/serial/relayport.cpp
         src/pages/debugpanel.cpp
+        src/config/appconfig.cpp
     )
     set_target_properties(my_com_qt_tests PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests

@@ -4,7 +4,9 @@
 
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDir>
+#include <QFileDialog>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
@@ -38,6 +40,8 @@ CommandEditorDialog::CommandEditorDialog(const QString& loadPath, const QString&
         QStringLiteral("分组与指令可自由增改；带参数指令的 send 用 %1 占位（如 @W21:%1.）。"
                        "参数不做位数/格式限制（通用串口助手，不绑定特定协议）。"),
         this));
+    // 2026-10-22 用户反馈：去掉保存路径提示（多余的提示）；「加载表格」的语义
+    // 由按钮 tooltip 说明，窗口更清爽
 
     m_table = new QTableWidget(this);
     m_table->setColumnCount(ColCount);
@@ -54,6 +58,9 @@ CommandEditorDialog::CommandEditorDialog(const QString& loadPath, const QString&
     auto* btnRow = new QHBoxLayout;
     auto* addBtn = new QPushButton(QStringLiteral("添加指令"), this);
     auto* delBtn = new QPushButton(QStringLiteral("删除选中"), this);
+    // 换电脑导入入口：选 json 替换当前编辑内容，只改内存，保存/关闭才写固定用户目录
+    auto* loadBtn = new QPushButton(QStringLiteral("加载表格"), this);
+    loadBtn->setToolTip(QStringLiteral("从 CSV/JSON 文件导入并替换当前编辑内容（保存/关闭才写盘）"));
     m_saveBtn = new QPushButton(QStringLiteral("保存"), this);
     m_saveBtn->setProperty("primary", true);
     // 用户反馈：关闭即保存——「关闭」按钮与窗口 X 都走保存流程
@@ -61,17 +68,21 @@ CommandEditorDialog::CommandEditorDialog(const QString& loadPath, const QString&
     closeBtn->setToolTip(QStringLiteral("关闭并保存到用户目录"));
     connect(addBtn, &QPushButton::clicked, this, &CommandEditorDialog::onAddRow);
     connect(delBtn, &QPushButton::clicked, this, &CommandEditorDialog::onRemoveSelected);
+    connect(loadBtn, &QPushButton::clicked, this, &CommandEditorDialog::onLoadTable);
     connect(m_saveBtn, &QPushButton::clicked, this, &CommandEditorDialog::onSave);
     connect(closeBtn, &QPushButton::clicked, this, &CommandEditorDialog::onSave);
     btnRow->addWidget(addBtn);
     btnRow->addWidget(delBtn);
     btnRow->addStretch(1);
+    btnRow->addWidget(loadBtn);
     btnRow->addWidget(m_saveBtn);
     btnRow->addWidget(closeBtn);
     root->addLayout(btnRow);
 
-    // 加载当前指令表（从面板实际加载的文件读；失败则表格为空、可从头新建）
-    if (m_model.load(loadPath))
+    // 加载当前指令表（从面板实际加载的文件读；失败则表格为空、可从头新建）。
+    // 按扩展名解析：固定位置为 .csv（2026-10-21 拍板），注入/旧 json 路径仍走 json
+    const bool isCsv = loadPath.toLower().endsWith(QStringLiteral(".csv"));
+    if (isCsv ? m_model.loadCsv(loadPath) : m_model.load(loadPath))
         fillTable();
 }
 
@@ -145,6 +156,33 @@ void CommandEditorDialog::onRemoveSelected()
         m_table->removeRow(r);
 }
 
+void CommandEditorDialog::onLoadTable()
+{
+    // 换电脑导入（用户 2026-10-20 拍板）：初始目录 = exe 旁（构建后模板种子所在）。
+    // 2026-10-21 起同时支持 CSV（用户拍板，Excel 编辑）与 JSON（老表兼容）
+    const QString path = QFileDialog::getOpenFileName(
+        this, QStringLiteral("加载指令表"), QCoreApplication::applicationDirPath(),
+        QStringLiteral("指令表 (*.csv *.json)"));
+    if (path.isEmpty())
+        return; // 用户取消，不做任何变化
+    // 按扩展名解析；失败时弹警告、当前编辑内容保持不变。
+    // CSV 无法区分"合法空表"与"内容全坏"（都解析出 0 行），保守按失败处理：
+    // 选错文件（二进制/无关 csv）不会静默清空编辑表格（T14 二轮审查 Major）；
+    // 合法空表 = JSON {} 或编辑器内自行删行，不必经「加载表格」导入
+    const bool isCsvPath = path.toLower().endsWith(QStringLiteral(".csv"));
+    const bool ok = isCsvPath ? (m_model.loadCsv(path) && !m_model.groups().isEmpty())
+                              : m_model.load(path);
+    if (!ok) {
+        QMessageBox::warning(this, QStringLiteral("加载失败"),
+                             QStringLiteral("无法读取所选文件（不存在、格式损坏或无有效指令行）："
+                                            "\n%1\n当前编辑内容保持不变。")
+                                 .arg(path));
+        return;
+    }
+    // 全量替换 6 列编辑内容；只改内存，保存/关闭才写固定用户目录
+    fillTable();
+}
+
 bool CommandEditorDialog::collectAndValidate(QString* err)
 {
     QVector<DebugCommandModel::Entry> es;
@@ -185,13 +223,17 @@ bool CommandEditorDialog::doSave()
     if (m_model.entries().isEmpty()) {
         const auto r = QMessageBox::question(
             this, QStringLiteral("指令表为空"),
-            QStringLiteral("当前指令表没有任何指令，保存后调试面板将只剩内置最小集。\n"
+            // 面板已无内置最小集回退，空表保存后就是空白表格
+            QStringLiteral("当前指令表没有任何指令，保存后调试面板将无任何指令（空白表格）。\n"
                            "确定要保存空表吗？"),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
         if (r != QMessageBox::Yes)
             return false;
     }
-    if (!m_model.save(m_jsonPath)) {
+    // 按扩展名写盘：固定位置为 .csv（2026-10-21 用户拍板，Excel 可编辑），
+    // 测试注入的 json 路径仍走 json
+    const bool isCsvPath = m_jsonPath.toLower().endsWith(QStringLiteral(".csv"));
+    if (!(isCsvPath ? m_model.saveCsv(m_jsonPath) : m_model.save(m_jsonPath))) {
         QMessageBox::warning(this, QStringLiteral("保存失败"),
                              QStringLiteral("无法写入：%1").arg(m_jsonPath));
         return false;
